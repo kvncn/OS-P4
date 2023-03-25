@@ -17,6 +17,8 @@
 #include <phase2.h>
 #include <phase3.h>
 #include <phase4.h>
+#include <usloss.h>
+#include <usyscall.h>
 #include <string.h>
 #include <stdlib.h>
 
