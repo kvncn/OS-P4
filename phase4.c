@@ -5,7 +5,9 @@
  * ASSIGNMENT: Phase4
  * DUE_DATE:   04/13/2023
  * 
- * 
+ * This phase is responsible for device drivers,
+ * particularly the clock device, the terminal and
+ * also disk devices and their system calls. 
  */
 
 // ----- Constants 
@@ -81,6 +83,11 @@ void phase4_start_service_processes(void) {}
  * @return void
 */
 void sleepHandler(sysArgs* args) {
+    // illegal input value (negative time)
+    if (args->arg1 < 0) {
+        args->arg4 = -1;
+        return;
+    }
 
 }
 
