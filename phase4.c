@@ -69,7 +69,9 @@ void phase4_init(void) {
 /**
  * Since we do not use any service processes, this function is blank. 
  */
-void phase4_start_service_processes(void) {}
+void phase4_start_service_processes(void) {
+    fork1("SleepHelper", sleepHelperMain, NULL, USLOSS_MIN_STACK, 6);
+}
 
 // ----- Syscall Handlers
 
@@ -180,3 +182,22 @@ void diskWriteHandler(sysArgs* args) {
 }
 
 // ----- Helper Functions
+
+int sleepHelperMain(char* args) {
+    int intCount = 0;
+    int lastTime = 0;
+    // increment counter each time interrupt is received
+    while (1) {
+        // check time and if interrupt occured
+        int time = USLOSS_DeviceInput(USLOSS_CLOCK_DEV, 0, &status);
+        if (time != lastTime) {
+            intCount++;
+            lastTime = time; 
+        }
+
+        // check if there any processes to wake up now, and
+        // wake them up!, maybe it should be lastTime here idk
+        if (intCount == -1)
+    }
+
+}
