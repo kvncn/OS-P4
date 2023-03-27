@@ -83,12 +83,29 @@ void phase4_start_service_processes(void) {}
  * @return void
 */
 void sleepHandler(sysArgs* args) {
+    int seconds = (int) args->arg1;
+    
     // illegal input value (negative time)
-    if (args->arg1 < 0) {
-        args->arg4 = -1;
+    if (seconds < 0) {
+        args->arg4 = (void*) -1;
         return;
     }
 
+    int msec = seconds * 1000;
+    int status;
+
+    // wait for the clock device to become available
+    int unit = 0; // assuming clock is device unit 0
+    waitDevice(USLOSS_CLOCK_DEV, unit, &status);
+
+    // set a time for the clock interrupt
+    int time = USLOSS_DeviceInput(unit, 0, &status) + msec;
+    USLOSS_DeviceOutput(unit, 0, (void *) time);
+
+    // wait for a clock interrupt to occur
+    waitDevice(USLOSS_CLOCK_DEV, unit, &status);
+
+    args->arg4 = (void*) 0;
 }
 
 /**
