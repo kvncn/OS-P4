@@ -46,6 +46,7 @@ void diskReadHandler(sysArgs*);
 void diskWriteHandler(sysArgs*);
 
 // Helpers
+int sleepHelperMain(char*);
 
 // ----- Global data structures/vars
 
@@ -188,6 +189,7 @@ int sleepHelperMain(char* args) {
     int lastTime = 0;
     // increment counter each time interrupt is received
     while (1) {
+        int status; 
         // check time and if interrupt occured
         int time = USLOSS_DeviceInput(USLOSS_CLOCK_DEV, 0, &status);
         if (time != lastTime) {
@@ -197,7 +199,6 @@ int sleepHelperMain(char* args) {
 
         // check if there any processes to wake up now, and
         // wake them up!, maybe it should be lastTime here idk
-        if (intCount == -1)
+        if (intCount == -1) {}
     }
-
 }
