@@ -129,6 +129,18 @@ void phase4_init(void) {
 void phase4_start_service_processes(void) {
     // initialize clock/sleep daemon
     int sleepHelper = fork1("SleepHelper", sleepHelperMain, NULL, USLOSS_MIN_STACK, 2);
+    
+    
+    // initialize terminal daemons
+    for (int i = 0; i < USLOSS_TERM_UNITS; i++) {
+        char termName[128];
+        sprintf(termName, "Terminal Driver %d", i);
+        char termUnit[100];
+        sprintf(termUnit, "%d", i);
+
+        int termPID = fork1(termName, termHelperMain, termUnit, USLOSS_MIN_STACK, 2);
+    }
+
 }
 
 // ----- Syscall Handlers
