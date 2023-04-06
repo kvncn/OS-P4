@@ -68,10 +68,20 @@ void cleanSleepEntry(int);
 int getNextSleeper();
 
 // ----- Global data structures/vars
+
+// sleep
 sleepRequest sleepRequestsTable[MAXPROC];
 sleepRequest* sleepRequests;
-int curSleeperIdx;                        // for sleepRequest allocation
+int curSleeperIdx;      
 
+// terminal
+char termLines[USLOSS_TERM_UNITS][MAXLINE]; 
+int termLineIdx[USLOSS_TERM_UNITS];        
+int termRead[USLOSS_TERM_UNITS];           
+int termReadyWrite[USLOSS_TERM_UNITS];            
+int termWriteMutex[USLOSS_TERM_UNITS];
+
+// disk
 diskRequest diskRequestsTable[MAXPROC];
 int curDiskIdx;
 
@@ -97,6 +107,14 @@ void phase4_init(void) {
     sleepRequests = NULL;
     curSleeperIdx = 0;
 
+    // terminal initialization
+    memset(termLines, '\0', sizeof(termLines));
+    memset(termLineIdx, 0, sizeof(termLineIdx));
+    for (int i = 0; i < USLOSS_TERM_UNITS; i++) {
+        termRead[i] = MboxCreate(10, MAXLINE);
+        termReadyWrite[i] = MboxCreate(1, 0);
+        termWriteMutex[i] = MboxCreate(1, 0);
+    }
 
     // diskRequest setup
     for (int i = 0; i < MAXPROC; i++) {
@@ -151,12 +169,6 @@ void sleepHandler(sysArgs* args) {
         sleepRequest* rest = sleepRequests;
         toSleep->next = rest; 
         sleepRequests = toSleep; 
-        // // iterate over queue and add toSleep to it
-        // sleepRequest* curr = sleepRequests;
-        // while (curr->next != NULL) {
-        //     curr = curr->next;
-        // }
-        // curr->next = toSleep;
     }
 
     // block/sleep proc until we can wake it up
@@ -179,6 +191,33 @@ void sleepHandler(sysArgs* args) {
 */
 void termReadHandler(sysArgs* args) {
     kernelCheck("termReadHandler");
+
+    char* location = (char*) args -> arg1;
+    int locationLen = (int)(long)args -> arg2;
+    int termUnit = (int)(long) args -> arg3;
+
+    if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS)
+    {
+        args->arg4  = (void*)(long)-1;
+        return;
+    }
+
+    char line[MAXLINE]; // buffer to store line read
+
+    // receive line from mailbox
+    int lineLen = MboxReceive(termRead[termUnit], &line, MAXLINE);
+
+    if (lineLen < 0) {
+        USLOSS_Console("DEBUG: Receiving from illegal Mailbox\n");
+    }
+
+    // Set out parameters
+    if (locationLen < lineLen)
+        lineLen = locationLen;
+    memcpy(location, line, lineLen);
+
+    args->arg2 = (void*)(long)lineLen;
+    args->arg4 = (void*)(long)0;
 
 }
 
@@ -324,6 +363,73 @@ int getNextSleeper() {
 	}
     
 	return curSleeperIdx % MAXPROC;
+}
+
+/**
+ * Main function for the daemon process responsible for checking
+ * for terminal interrupts, if its ready to read or write, it
+ * performs the operation accordingly. 
+ * 
+ * @param args, char pointer for the main function arguments
+ * 
+ * @return int representing if the exit status was normal
+ */
+int termHelperMain(char* args) {
+    int status; 
+
+    // get the terminal unit
+    int termUnit = atoi(args);
+
+    // start receiving interrupts
+    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long) USLOSS_TERM_CTRL_RECV_INT(0))
+    
+    while (1) {
+        waitDevice(USLOSS_TERM_DEV, unit, &status);
+
+        // read the receive field of the device
+        int recv = USLOSS_TERM_STAT_RECV(status);
+
+        // received input
+        if (recv == USLOSS_DEV_BUSY) {
+            char character = USLOSS_TERM_STAT_CHAR(status);
+            // find end of input
+            if (character == '\n' || termLineIdx[unit] == MAXLINE) {
+                // if we arent at the limit
+                if (termLineIdx[unit] != MAXLINE) {
+                    // just add to current line
+                    termLines[unit][termLineIdx[unit]] = character;
+                    termLineIdx[unit]++;
+                }
+                // send line to mailbox so we can access it 
+                MboxCondSend(termLinesReadMBox[unit], termLines[unit], termLineIdx[unit]);
+                // reset pointer of line
+                memset(termLines[unit], '\0', sizeof(termLines[unit]));
+                termLineIdx[unit] = 0;
+            } else {
+                // just add to current line
+                termLines[unit][termLineIdx[unit]] = characterRead;
+                termLineIdx[unit]++;
+            }
+        // if we can't receive
+        } else if (recv == USLOSS_DEV_ERROR) {
+            USLOSS_Console("USLOSS_DEV_ERROR. Terminating simulation.\n");
+            USLOSS_Halt(1);
+        }
+
+        // now this means we can check for writes
+        // read the Xmit field from the status register
+        int xmit = USLOSS_TERM_STAT_XMIT(status);
+        // if terminal is ready to write new character
+        if (xmit == USLOSS_DEV_READY) {
+            // mark terminal as ready to write
+            MboxCondSend(termReadyWrite[unit], NULL, 0);
+        // if we can't write yet
+        } else if (xmit == USLOSS_DEV_ERROR) {
+            USLOSS_Console("USLOSS_DEV_ERROR. Terminating simulation.\n");
+            USLOSS_Halt(1);
+        }
+    }
+    return 0; 
 }
 
 /**
