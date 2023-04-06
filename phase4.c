@@ -121,8 +121,6 @@ void phase4_init(void) {
         cleanDiskEntry(i);
     }
     curDiskIdx = 0;
-
-
 }
 
 /**
@@ -157,6 +155,7 @@ void sleepHandler(sysArgs* args) {
 
     int sleepIdx = getNextSleeper();
 
+    // allocate the sleep request
     sleepRequest* toSleep = &sleepRequestsTable[sleepIdx];
     toSleep->wakeUpTime = currentTime() + msecs * 1000000;
     toSleep->mutex = MboxCreate(1, 0);
@@ -196,13 +195,13 @@ void termReadHandler(sysArgs* args) {
     int locationLen = (int)(long)args -> arg2;
     int termUnit = (int)(long) args -> arg3;
 
-    if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS)
-    {
+    if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS) {
         args->arg4  = (void*)(long)-1;
         return;
     }
 
-    char line[MAXLINE]; // buffer to store line read
+    // buffer to store line read
+    char line[MAXLINE];
 
     // receive line from mailbox
     int lineLen = MboxRecv(termRead[termUnit], &line, MAXLINE);
@@ -214,6 +213,7 @@ void termReadHandler(sysArgs* args) {
 
     memcpy(location, line, lineLen);
 
+    // set return values
     args->arg2 = (void*)(long)lineLen;
     args->arg4 = (void*)(long)0;
 
@@ -232,6 +232,38 @@ void termReadHandler(sysArgs* args) {
 void termWriteHandler(sysArgs* args) {
     kernelCheck("termWriteHandler");
 
+    char* location = (char*) args -> arg1;
+    int locationLen = (int)(long)args -> arg2;
+    int termUnit = (int)(long) args -> arg3;
+
+    if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS) {
+        args->arg4  = (void*)(long)-1;
+        return;
+    }
+
+    // acquire lock to work on terminal
+    MboxSend(termWriteMutex[termUnit], NULL, 0);
+
+    for (int i = 0; i < locationLen; i++) {
+        // if we are not ready, block
+        MboxRecv(termReadyWrite[termUnit], NULL, 0);
+
+        // get the control value
+        int ctrl = USLOSS_TERM_CTRL_XMIT_CHAR(0);
+        ctrl = USLOSS_TERM_CTRL_RECV_INT(ctrL);
+        ctrl = USLOSS_TERM_CTRL_XMIT_INT(ctrl);
+        ctrl = USLOSS_TERM_CTRL_CHAR(ctrl, location[i]);
+
+        // update the control while writing to character
+        int devOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long)ctrl);
+    }
+
+    // set return values
+    args->arg2 = (void*)(long)lineLen;
+    args->arg4 = (void*)(long)0;
+
+    // release lock as we stopped work on the terminal
+    MboxRecv(termWriteMutex[termUnit], NULL, 0);
 }
 
 /**
