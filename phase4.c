@@ -13,6 +13,8 @@
 // ----- Constants 
 #define FREE 0
 #define IN_USE 1
+#define AWAKE 2
+#define ASLEEP 3
 
 // ----- Includes
 #include <phase1.h>
@@ -27,8 +29,17 @@
 
 // ----- typedefs
 typedef USLOSS_Sysargs sysArgs;
+typedef struct sleepRequest sleepRequest; 
+
 
 // ----- Structs
+
+struct sleepRequest {
+    int status;         // if the proc is awake or asleep
+    long wakeUpTime;    // time to check if should wake up
+    sleepRequest *next; // next proc to sleep/wake up
+    int mutex;          // lock for the request
+};
 
 
 // ----- Function Prototypes
@@ -46,9 +57,16 @@ void diskReadHandler(sysArgs*);
 void diskWriteHandler(sysArgs*);
 
 // Helpers
+void kernelCheck(char*);
+void cleanShadowEntry(int);
 int sleepHelperMain(char*);
+void cleanSleepEntry(int);
+int getNextSleeper();
 
 // ----- Global data structures/vars
+sleepRequest sleepRequestsTable[MAXPROC];
+sleepRequest* sleepRequests;
+int curSleeperIdx;                        // for sleepRequest allocation
 
 // ----- Phase 4 Bootload
 
@@ -65,13 +83,20 @@ void phase4_init(void) {
     systemCallVec[SYS_DISKREAD]  = diskReadHandler;
     systemCallVec[SYS_DISKWRITE] = diskWriteHandler;
 
+    // sleepRequest setup
+    for (int i = 0; i < MAXPROC; i++) {
+        cleanSleepEntry(i);
+    }
+    sleepRequests = NULL;
+    curSleeperIdx = 0;
 }
 
 /**
  * Since we do not use any service processes, this function is blank. 
  */
 void phase4_start_service_processes(void) {
-    fork1("SleepHelper", sleepHelperMain, NULL, USLOSS_MIN_STACK, 6);
+    // initialize clock/sleep daemon
+    int sleepHelper = fork1("SleepHelper", sleepHelperMain, NULL, USLOSS_MIN_STACK, 2);
 }
 
 // ----- Syscall Handlers
@@ -86,31 +111,39 @@ void phase4_start_service_processes(void) {
  * @return void
 */
 void sleepHandler(sysArgs* args) {
-    int seconds = (int) args->arg1;
+    kernelCheck("Sleep Handler");
 
-    // illegal input value (negative time)
-    if (seconds < 0) {
-        args->arg4 = (void*) -1;
+    long msecs = (long) args->arg1; 
+
+    // invalid param
+    if (msecs < 0) {
+        args->arg4 = (void *)(long)-1;
         return;
     }
 
-    int msec = seconds * 1000;
-    int status;
+    int sleepIdx = getNextSleeper();
 
-    // wait for the clock device to become available
-    int unit = 0; // assuming clock is device unit 0
-    
-     // set a time for the clock interrupt
-    int time = USLOSS_DeviceInput(unit, 0, &status) + msec;
+    sleepRequest* toSleep = &sleepRequestsTable[sleepIdx];
+    toSleep->wakeUpTime = currentTime() + msecs * 1000000;
+    toSleep->mutex = MboxCreate(1, 0);
 
-    waitDevice(USLOSS_CLOCK_DEV, unit, &status);
+    // add to sleep requests queue
+    if (sleepRequests == NULL) {
+        sleepRequests = toSleep;
+    } else {
+        // iterate over queue and add toSleep to it
+        sleepRequest* curr = sleepRequests;
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        curr->next = toSleep;
+    }
 
-    USLOSS_DeviceOutput(unit, unit, (void *) time);
+    // block/sleep proc until we can wake it up
+    MboxRecv(toSleep->mutex, NULL, 0);
 
-    // wait for a clock interrupt to occur
-    waitDevice(USLOSS_CLOCK_DEV, unit, &status);
-
-    args->arg4 = (void*) 0;
+    // return 0 as operation was successful
+    args->arg4 = (void *) (long) 0;
 }
 
 /**
@@ -184,21 +217,96 @@ void diskWriteHandler(sysArgs* args) {
 
 // ----- Helper Functions
 
+/**
+ * Checks whether or not the simulation is running in kernel mode and halts the
+ * entire simulation if so. 
+ * 
+ * @param func, char pointer representing the functions' name so we can output 
+ * a good error message as to what process tried running in user mode
+ */
+void kernelCheck(char* func) {
+    // means we are running in user mode, so we halt simulation
+    if (!(USLOSS_PsrGet() & USLOSS_PSR_CURRENT_MODE)) {
+		USLOSS_Console("ERROR: Someone attempted to call %s while in user mode!\n", func);
+		USLOSS_Halt(1);
+	}
+}
+
+/**
+ * Helper to change from kernel to user mode. 
+*/
+void changeMode() {
+    kernelCheck("changeMode");
+    int chng = USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_MODE);
+}
+
+/**
+ * Main function for the daemon process responsible for checking
+ * wake up times for the sleep device, if a process wake up time
+ * has arrived it will wake it up and keep track of the next 
+ * request. 
+ * 
+ * @param args, char pointer for the main function arguments
+ * 
+ * @return int representing if the exit status was normal
+ */
 int sleepHelperMain(char* args) {
-    int intCount = 0;
-    int lastTime = 0;
+    int status; 
+    
     // increment counter each time interrupt is received
     while (1) {
-        int status; 
-        // check time and if interrupt occured
-        int time = USLOSS_DeviceInput(USLOSS_CLOCK_DEV, 0, &status);
-        if (time != lastTime) {
-            intCount++;
-            lastTime = time; 
-        }
+        waitDevice(USLOSS_CLOCK_DEV, 0, &status);
 
-        // check if there any processes to wake up now, and
-        // wake them up!, maybe it should be lastTime here idk
-        if (intCount == -1) {}
+        sleepRequest *proc = sleepRequests;
+        
+        // if we still have processes to wake up, do 
+        // so 
+        while (proc != NULL) {
+            // if we can wake up one process, do so, otherwise check along
+            // the queue
+            if (proc->status == ASLEEP && proc->wakeUpTime < currentTime()) {
+                proc->status = AWAKE;
+                MboxSend(proc->mutex, NULL, 0);
+                break;
+            }
+            proc = proc->next;
+        }
     }
+    return 0; 
+}
+
+/**
+ * Helper for cleaning/initializing a sleeper entry to the default/zero
+ * values. 
+ * 
+ * @param slot, int representing index into the sleepRequestTable
+ */
+void cleanSleepEntry(int slot) {
+    sleepRequestsTable[slot].mutex = 0;
+    sleepRequestsTable[slot].next = NULL;
+    sleepRequestsTable[slot].status = FREE;
+    sleepRequestsTable[slot].wakeUpTime = 0;
+}
+
+/**
+ * Tries to find the next free sleeper slot in the global array and
+ * returns the index so we can access that sleep request. 
+ * 
+ * @return int representing the index into the array
+ */
+int getNextSleeper() {
+    int count = 0;
+    // in a circular fashion, try to find the next free process
+    // in the sleeper table
+	while (sleepRequestsTable[curSleeperIdx % MAXPROC].status != FREE) {
+		if (count < MAXPROC) {
+            count++;
+		    curSleeperIdx++;
+        } else {
+            return -1;
+        }
+	}
+    
+	return curSleeperIdx % MAXPROC;
+
 }
