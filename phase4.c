@@ -42,7 +42,7 @@ struct sleepRequest {
     int mutex;          // lock for the request
 };
 
-struct diskReques {
+struct diskRequest {
 
 };
 
@@ -62,7 +62,7 @@ void diskWriteHandler(sysArgs*);
 
 // Helpers
 void kernelCheck(char*);
-void cleanShadowEntry(int);
+void cleanDiskEntry(int);
 int sleepHelperMain(char*);
 void cleanSleepEntry(int);
 int getNextSleeper();
