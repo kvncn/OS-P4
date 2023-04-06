@@ -126,6 +126,7 @@ void sleepHandler(sysArgs* args) {
     sleepRequest* toSleep = &sleepRequestsTable[sleepIdx];
     toSleep->wakeUpTime = currentTime() + msecs * 1000000;
     toSleep->mutex = MboxCreate(1, 0);
+    toSleep->status = ASLEEP;
 
     // add to sleep requests queue
     if (sleepRequests == NULL) {
