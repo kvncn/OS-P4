@@ -66,6 +66,7 @@ void cleanDiskEntry(int);
 int sleepHelperMain(char*);
 void cleanSleepEntry(int);
 int getNextSleeper();
+int termHelperMain(char*);
 
 // ----- Global data structures/vars
 
@@ -430,6 +431,7 @@ int termHelperMain(char* args) {
 
         // read the receive field of the device
         int recv = USLOSS_TERM_STAT_RECV(status);
+        USLOSS_Console("Receive\n");
 
         // received input
         if (recv == USLOSS_DEV_BUSY) {
