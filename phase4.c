@@ -250,7 +250,7 @@ void termWriteHandler(sysArgs* args) {
 
         // get the control value
         int ctrl = USLOSS_TERM_CTRL_XMIT_CHAR(0);
-        ctrl = USLOSS_TERM_CTRL_RECV_INT(ctrL);
+        ctrl = USLOSS_TERM_CTRL_RECV_INT(ctrl);
         ctrl = USLOSS_TERM_CTRL_XMIT_INT(ctrl);
         ctrl = USLOSS_TERM_CTRL_CHAR(ctrl, location[i]);
 
@@ -259,7 +259,7 @@ void termWriteHandler(sysArgs* args) {
     }
 
     // set return values
-    args->arg2 = (void*)(long)lineLen;
+    args->arg2 = (void*)(long)locationLen;
     args->arg4 = (void*)(long)0;
 
     // release lock as we stopped work on the terminal
