@@ -284,7 +284,7 @@ int sleepHelperMain(char* args) {
             if (proc->status == ASLEEP && proc->wakeUpTime < currentTime()) {
                 proc->status = AWAKE;
                 MboxSend(proc->mutex, NULL, 0);
-                break;
+                //break;
             }
             proc = proc->next;
         }
