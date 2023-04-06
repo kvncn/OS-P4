@@ -205,15 +205,13 @@ void termReadHandler(sysArgs* args) {
     char line[MAXLINE]; // buffer to store line read
 
     // receive line from mailbox
-    int lineLen = MboxReceive(termRead[termUnit], &line, MAXLINE);
+    int lineLen = MboxRecv(termRead[termUnit], &line, MAXLINE);
 
-    if (lineLen < 0) {
-        USLOSS_Console("DEBUG: Receiving from illegal Mailbox\n");
+    // if the location is less than the lineLen, we need to bound lineLen
+    if (locationLen < lineLen) {
+        lineLen = locationLen;
     }
 
-    // Set out parameters
-    if (locationLen < lineLen)
-        lineLen = locationLen;
     memcpy(location, line, lineLen);
 
     args->arg2 = (void*)(long)lineLen;
@@ -381,10 +379,10 @@ int termHelperMain(char* args) {
     int termUnit = atoi(args);
 
     // start receiving interrupts
-    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long) USLOSS_TERM_CTRL_RECV_INT(0))
+    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long) USLOSS_TERM_CTRL_RECV_INT(0));
     
     while (1) {
-        waitDevice(USLOSS_TERM_DEV, unit, &status);
+        waitDevice(USLOSS_TERM_DEV, termUnit, &status);
 
         // read the receive field of the device
         int recv = USLOSS_TERM_STAT_RECV(status);
@@ -393,22 +391,22 @@ int termHelperMain(char* args) {
         if (recv == USLOSS_DEV_BUSY) {
             char character = USLOSS_TERM_STAT_CHAR(status);
             // find end of input
-            if (character == '\n' || termLineIdx[unit] == MAXLINE) {
+            if (character == '\n' || termLineIdx[termUnit] == MAXLINE) {
                 // if we arent at the limit
-                if (termLineIdx[unit] != MAXLINE) {
+                if (termLineIdx[termUnit] != MAXLINE) {
                     // just add to current line
-                    termLines[unit][termLineIdx[unit]] = character;
-                    termLineIdx[unit]++;
+                    termLines[termUnit][termLineIdx[termUnit]] = character;
+                    termLineIdx[termUnit]++;
                 }
                 // send line to mailbox so we can access it 
-                MboxCondSend(termLinesReadMBox[unit], termLines[unit], termLineIdx[unit]);
+                MboxCondSend(termRead[termUnit], termLines[termUnit], termLineIdx[termUnit]);
                 // reset pointer of line
-                memset(termLines[unit], '\0', sizeof(termLines[unit]));
-                termLineIdx[unit] = 0;
+                memset(termLines[termUnit], '\0', sizeof(termLines[termUnit]));
+                termLineIdx[termUnit] = 0;
             } else {
                 // just add to current line
-                termLines[unit][termLineIdx[unit]] = characterRead;
-                termLineIdx[unit]++;
+                termLines[termUnit][termLineIdx[termUnit]] = character;
+                termLineIdx[termUnit]++;
             }
         // if we can't receive
         } else if (recv == USLOSS_DEV_ERROR) {
@@ -422,7 +420,7 @@ int termHelperMain(char* args) {
         // if terminal is ready to write new character
         if (xmit == USLOSS_DEV_READY) {
             // mark terminal as ready to write
-            MboxCondSend(termReadyWrite[unit], NULL, 0);
+            MboxCondSend(termReadyWrite[termUnit], NULL, 0);
         // if we can't write yet
         } else if (xmit == USLOSS_DEV_ERROR) {
             USLOSS_Console("USLOSS_DEV_ERROR. Terminating simulation.\n");
