@@ -148,12 +148,15 @@ void sleepHandler(sysArgs* args) {
     if (sleepRequests == NULL) {
         sleepRequests = toSleep;
     } else {
-        // iterate over queue and add toSleep to it
-        sleepRequest* curr = sleepRequests;
-        while (curr->next != NULL) {
-            curr = curr->next;
-        }
-        curr->next = toSleep;
+        sleepRequest* rest = sleepRequests;
+        toSleep->next = rest; 
+        sleepRequests = toSleep; 
+        // // iterate over queue and add toSleep to it
+        // sleepRequest* curr = sleepRequests;
+        // while (curr->next != NULL) {
+        //     curr = curr->next;
+        // }
+        // curr->next = toSleep;
     }
 
     // block/sleep proc until we can wake it up
