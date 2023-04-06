@@ -30,6 +30,7 @@
 // ----- typedefs
 typedef USLOSS_Sysargs sysArgs;
 typedef struct sleepRequest sleepRequest; 
+typedef struct diskRequest diskRequest; 
 
 
 // ----- Structs
@@ -41,6 +42,9 @@ struct sleepRequest {
     int mutex;          // lock for the request
 };
 
+struct diskReques {
+
+};
 
 // ----- Function Prototypes
 
@@ -68,6 +72,9 @@ sleepRequest sleepRequestsTable[MAXPROC];
 sleepRequest* sleepRequests;
 int curSleeperIdx;                        // for sleepRequest allocation
 
+diskRequest diskRequestsTable[MAXPROC];
+int curDiskIdx;
+
 // ----- Phase 4 Bootload
 
 /**
@@ -89,6 +96,15 @@ void phase4_init(void) {
     }
     sleepRequests = NULL;
     curSleeperIdx = 0;
+
+
+    // diskRequest setup
+    for (int i = 0; i < MAXPROC; i++) {
+        cleanDiskEntry(i);
+    }
+    curDiskIdx = 0;
+
+
 }
 
 /**
@@ -111,7 +127,7 @@ void phase4_start_service_processes(void) {
  * @return void
 */
 void sleepHandler(sysArgs* args) {
-    kernelCheck("Sleep Handler");
+    kernelCheck("sleepHandler");
 
     long msecs = (long) args->arg1; 
 
@@ -159,6 +175,7 @@ void sleepHandler(sysArgs* args) {
  * @return void
 */
 void termReadHandler(sysArgs* args) {
+    kernelCheck("termReadHandler");
 
 }
 
@@ -173,6 +190,7 @@ void termReadHandler(sysArgs* args) {
  * @return void
 */
 void termWriteHandler(sysArgs* args) {
+    kernelCheck("termWriteHandler");
 
 }
 
@@ -187,6 +205,7 @@ void termWriteHandler(sysArgs* args) {
  * @return void
 */
 void diskSizeHandler(sysArgs* args) {
+    kernelCheck("diskSizeHandler");
 
 }
 
@@ -200,6 +219,7 @@ void diskSizeHandler(sysArgs* args) {
  * @return void
 */
 void diskReadHandler(sysArgs* args) {
+    kernelCheck("diskReadHandler");
 
 }
 
@@ -213,6 +233,7 @@ void diskReadHandler(sysArgs* args) {
  * @return void
 */
 void diskWriteHandler(sysArgs* args) {
+    kernelCheck("diskWriteHandler");
 
 }
 
@@ -231,14 +252,6 @@ void kernelCheck(char* func) {
 		USLOSS_Console("ERROR: Someone attempted to call %s while in user mode!\n", func);
 		USLOSS_Halt(1);
 	}
-}
-
-/**
- * Helper to change from kernel to user mode. 
-*/
-void changeMode() {
-    kernelCheck("changeMode");
-    int chng = USLOSS_PsrSet(USLOSS_PsrGet() & ~USLOSS_PSR_CURRENT_MODE);
 }
 
 /**
@@ -309,5 +322,14 @@ int getNextSleeper() {
 	}
     
 	return curSleeperIdx % MAXPROC;
+}
+
+/**
+ * Helper for cleaning/initializing a disk entry to the default/zero
+ * values. 
+ * 
+ * @param slot, int representing index into the diskRequestTable
+ */
+void cleanDiskEntry(int slot) {
 
 }
