@@ -26,6 +26,7 @@
 #include <usyscall.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 // ----- typedefs
 typedef USLOSS_Sysargs sysArgs;
@@ -445,7 +446,7 @@ int termHelperMain(char* args) {
                     termLineIdx[termUnit]++;
                 }
                 // send line to mailbox so we can access it 
-                MboxSend(termRead[termUnit], termLines[termUnit], termLineIdx[termUnit]);
+                MboxCondSend(termRead[termUnit], termLines[termUnit], termLineIdx[termUnit]);
                 // reset pointer of line
                 memset(termLines[termUnit], '\0', sizeof(termLines[termUnit]));
                 termLineIdx[termUnit] = 0;
