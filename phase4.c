@@ -424,14 +424,14 @@ int termHelperMain(char* args) {
     int termUnit = atoi(args);
 
     // start receiving interrupts
-    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long) USLOSS_TERM_CTRL_RECV_INT(0));
+    int devCtrl = USLOSS_TERM_CTRL_RECV_INT(1) | USLOSS_TERM_CTRL_XMIT_INT(1);
+    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long)devCtrl);
     
     while (1) {
         waitDevice(USLOSS_TERM_DEV, termUnit, &status);
 
         // read the receive field of the device
         int recv = USLOSS_TERM_STAT_RECV(status);
-        USLOSS_Console("Receive\n");
 
         // received input
         if (recv == USLOSS_DEV_BUSY) {
@@ -445,7 +445,7 @@ int termHelperMain(char* args) {
                     termLineIdx[termUnit]++;
                 }
                 // send line to mailbox so we can access it 
-                MboxCondSend(termRead[termUnit], termLines[termUnit], termLineIdx[termUnit]);
+                MboxSend(termRead[termUnit], termLines[termUnit], termLineIdx[termUnit]);
                 // reset pointer of line
                 memset(termLines[termUnit], '\0', sizeof(termLines[termUnit]));
                 termLineIdx[termUnit] = 0;
