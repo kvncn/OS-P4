@@ -339,6 +339,24 @@ void termWriteHandler(sysArgs* args) {
 void diskSizeHandler(sysArgs* args) {
     kernelCheck("diskSizeHandler");
 
+    int unit = (long)args->arg1;
+    int daemonMutexTrack = -1;
+
+    // setup daemon mutex
+    if (unit == 0) {
+        daemonMutexTrack = disk0MutexTrack;
+    } else {
+        daemonMutexTrack = disk1MutexTrack;
+    }
+
+    MboxRecv(daemonMutexTrack, NULL, 0);
+
+    // set the appropriate syscall output values
+    args->arg1 = (void *)USLOSS_DISK_SECTOR_SIZE;
+    args->arg2 = (void *)USLOSS_DISK_TRACK_SIZE;
+    args->arg3 = (void *)(long) globaldisk;
+    args->arg4 = (void *)0;
+
 }
 
 /**
