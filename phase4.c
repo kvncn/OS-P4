@@ -78,6 +78,7 @@ int diskHelperMain(char*);
 void diskSeek(int, int);
 int diskReader(int, int, int, int, void*);
 void diskQueueHelper(int, int, int);
+int diskWrite(int, int, int, int, void*);
 
 // ----- Global data structures/vars
 
@@ -373,7 +374,7 @@ void diskSizeHandler(sysArgs* args) {
 void diskReadHandler(sysArgs* args) {
     kernelCheck("diskReadHandler");
 
-    void *buffer = args->arg1;
+    void* buffer = args->arg1;
     int sectors = (int)(long)args->arg2;
     int track = (int)(long)args->arg3;
     int first = (int)(long)args->arg4;
@@ -395,6 +396,32 @@ void diskReadHandler(sysArgs* args) {
 */
 void diskWriteHandler(sysArgs* args) {
     kernelCheck("diskWriteHandler");
+
+    void* buffer = args->arg1;
+    int sectors = (int)(long)args->arg2;
+    int track = (int)(long)args->arg3;
+    int first = (int)(long)args->arg4;
+    int unit = (int)(long)args->arg5;
+
+    if (unit != 1 && unit != 0) {
+        args->arg4 = (void*)(long)-1;
+    }
+
+    int numTracks = -1;
+
+    if (unit == 0) {
+        numTracks = 16;
+    } else {
+        numTracks = 32;
+    }
+
+    if (track < 0 || track > numTracks - 1 || first < 0 || first >= USLOSS_DISK_TRACK_SIZE) {
+        args->arg4 = (void *)(long)-1;
+        return;
+    }
+
+    args->arg1 = (void*)(long)diskWrite(unit, track, first, sectors, buffer);
+    args->arg4 = (void*)(long)0;
 
 }
 
@@ -737,8 +764,6 @@ int diskReader(int unit, int track, int first, int sectors, void* buffer) {
         daemonMbox = disk1;
     }
 
-    // Set up the values in the shadow proc table so that the daemon can use them when
-    // it removes us from the queue
     diskRequestsTable[pid % MAXPROC].pid = pid;
     diskRequestsTable[pid % MAXPROC].track = track;
     diskRequestsTable[pid % MAXPROC].first = first;
@@ -792,6 +817,68 @@ void diskQueueHelper(int unit, int pid, int mboxToSend) {
     int savedTrack = diskRequestsTable[pid % MAXPROC].track;
 
     if (currTrack <= savedTrack) {
-        
+        while (diskReq->next != NULL && diskReq->next->track <= savedTrack && diskReq->next->track >= currTrack) {
+            diskReq = diskReq->next;
+        }
+        diskRequestsTable[pid % MAXPROC].next = diskReq->next;
+        diskReq->next = &diskRequestsTable[pid % MAXPROC];
+    } else {
+        while (diskReq->next != NULL && diskReq->next->track >= currTrack) {
+            diskReq = diskReq->next;
+        }
+
+        if (diskReq->next == NULL) {
+            diskReq->next = &diskRequestsTable[pid % MAXPROC];
+        } else {
+            while (diskReq->next != NULL && diskReq->next->track <= savedTrack) {
+                diskReq = diskReq->next;
+            }
+            diskRequestsTable[pid % MAXPROC].next = diskReq->next;
+            diskReq->next = &diskRequestsTable[pid % MAXPROC];
+        }
     }
+}
+
+/**
+ * Helper function for the read syscall. 
+ * 
+ * @param unit, int representing the disk unit
+ * @param track, int representing the track to search for
+ * @param first, int representing the first track on the disk
+ * @param sectors, int representing the sectors on the disk
+ * @param buffer, void* representing the buffer of the disk 
+ * 
+ * @return int 0 if the opertaion was sucessful
+ */
+int diskWrite(int unit, int track, int first, int sectors, void* buffer) {
+    int pid = getpid();
+
+    int daemonQMbox = -1;
+    int daemonMbox = -1; 
+
+    if (unit == 0) {
+        daemonQMbox = disk0Q;
+        daemonMbox = disk0;
+    } else {
+        daemonQMbox = disk1Q;
+        daemonMbox = disk1;
+    }
+
+    diskRequestsTable[pid % MAXPROC].pid = pid;
+    diskRequestsTable[pid % MAXPROC].track = track;
+    diskRequestsTable[pid % MAXPROC].first = first;
+    diskRequestsTable[pid % MAXPROC].sector = sectors;
+    diskRequestsTable[pid % MAXPROC].buffer = buffer;
+    diskRequestsTable[pid % MAXPROC].op = USLOSS_DISK_WRITE;
+
+    MboxSend(daemonQMbox, NULL, 0);
+
+    diskQueueHelper(unit, pid, daemonQMbox);
+
+    MboxRecv(daemonQMbox, NULL, 0);
+
+    MboxCondSend(daemonMbox, NULL, 0);
+    MboxRecv(diskRequestsTable[pid % MAXPROC].mboxID, NULL, 0);
+
+    return 0;
 }
