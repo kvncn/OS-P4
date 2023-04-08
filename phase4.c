@@ -76,6 +76,8 @@ int getNextSleeper();
 int termHelperMain(char*);
 int diskHelperMain(char*);
 void diskSeek(int, int);
+int diskReader(int, int, int, int, void*);
+void diskQueueHelper(int, int, int);
 
 // ----- Global data structures/vars
 
@@ -370,6 +372,15 @@ void diskSizeHandler(sysArgs* args) {
 */
 void diskReadHandler(sysArgs* args) {
     kernelCheck("diskReadHandler");
+
+    void *buffer = args->arg1;
+    int sectors = (int)(long)args->arg2;
+    int track = (int)(long)args->arg3;
+    int first = (int)(long)args->arg4;
+    int unit = (int)(long)args->arg5;
+
+    args->arg1 = (void *)(long)diskReader(unit, track, first, sectors, buffer);
+    args->arg4 = (void *)(long)0;
 
 }
 
@@ -699,4 +710,64 @@ void diskSeek(int unit, int track) {
 
     // release lock
     MboxRecv(daemonMutex, NULL, 0);
+}
+
+/**
+ * Helper function for the read syscall. 
+ * 
+ * @param unit, int representing the disk unit
+ * @param track, int representing the track to search for
+ * @param first, int representing the first track on the disk
+ * @param sectors, int representing the sectors on the disk
+ * @param buffer, void* representing the buffer of the disk 
+ * 
+ * @return int 0 if the opertaion was sucessful
+ */
+int diskReader(int unit, int track, int first, int sectors, void* buffer) {
+    int pid = getpid();
+
+    int daemonQMbox = -1;
+    int daemonMbox = -1;
+
+    if (unit == 0) {
+        daemonQMbox = disk0Q;
+        daemonMbox = disk0;
+    } else {
+        daemonQMbox = disk1Q;
+        daemonMbox = disk1;
+    }
+
+    // Set up the values in the shadow proc table so that the daemon can use them when
+    // it removes us from the queue
+    diskRequestsTable[pid % MAXPROC].pid = pid;
+    diskRequestsTable[pid % MAXPROC].track = track;
+    diskRequestsTable[pid % MAXPROC].first = first;
+    diskRequestsTable[pid % MAXPROC].sector = sectors;
+    diskRequestsTable[pid % MAXPROC].buffer = buffer;
+    diskRequestsTable[pid % MAXPROC].op = USLOSS_DISK_READ;
+
+    // acquire the lock since we want to add ourselves to the queue
+    MboxSend(daemonQMbox, NULL, 0);
+
+    // call the queue helper
+    diskQueueHelper(unit, pid, daemonQMbox);
+
+    // release the lock 
+    MboxRecv(daemonQMbox, NULL, 0);
+
+    // wake up the disk daemon
+    MboxCondSend(daemonMbox, NULL, 0);
+    MboxRecv(diskRequestsTable[pid % MAXPROC].mboxID, NULL, 0);
+
+    return 0;
+}
+
+/**
+ * Adds a request to the disk request queue.
+ * 
+ * @param unit, int representing the disk unit
+ * 
+ */
+void diskQueueHelper(int unit, int pid, int mboxToSend) {
+
 }
