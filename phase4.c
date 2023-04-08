@@ -766,8 +766,32 @@ int diskReader(int unit, int track, int first, int sectors, void* buffer) {
  * Adds a request to the disk request queue.
  * 
  * @param unit, int representing the disk unit
- * 
+ * @param pid, int representing id of the current process to add
+ * @param mboxToSend, int representing the mbox we will send the 
+ * information to
  */
 void diskQueueHelper(int unit, int pid, int mboxToSend) {
+    diskRequest* diskReq = NULL;
 
+    // set the queue based on the disk we are working with
+    if (unit == 0) {
+        // if no requests, this is the only one
+        if (disk0Req == NULL) {
+            disk0Req = &diskRequestsTable[pid % MAXPROC];
+        }
+        diskReq = disk0Req;
+    } else {
+        // if no requests, this is the only one
+        if (disk1Req == NULL) {
+            disk1Req = &diskRequestsTable[pid % MAXPROC];
+        }
+        diskReq = disk1Req;
+    }
+
+    int currTrack = diskReq->track;
+    int savedTrack = diskRequestsTable[pid % MAXPROC].track;
+
+    if (currTrack <= savedTrack) {
+        
+    }
 }
