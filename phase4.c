@@ -645,7 +645,6 @@ int diskHelperMain(char* args) {
             MboxSend(mboxID, NULL, 0);
         }
     }
-
     return 0;
 }
 
