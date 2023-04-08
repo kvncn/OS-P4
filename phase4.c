@@ -649,6 +649,37 @@ int diskHelperMain(char* args) {
     return 0;
 }
 
+/**
+ * Seeks the given disk for the appropriate task. 
+ * 
+ * @param unit, int representing the disk unit
+ * @param track, int representing the track to
+ * search for
+ */
 void diskSeek(int unit, int track) {
+    int result;
+    int status;
 
+    int daemonMutex = 1;
+
+    // check for the unit
+    if (unit == 0) {
+        daemonMutex = disk0Mutex;
+    } else {
+        daemonMutex = disk1Mutex;
+    }
+
+    // set up the request struct
+    USLOSS_DeviceRequest request; 
+    request.opr = USLOSS_DISK_SEEK;
+    request.reg1 = (void*)(long)track;
+
+    // acquire lock to work on it
+    MboxSend(daemonMutex, NULL, 0);
+
+    result = USLOSS_DeviceOutput(USLOSS_DISK_DEV, unit, &request);
+    waitDevice(USLOSS_DISK_DEV, unit, &status);
+
+    // release lock
+    MboxRecv(daemonMutex, NULL, 0);
 }
