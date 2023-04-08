@@ -75,6 +75,7 @@ void cleanSleepEntry(int);
 int getNextSleeper();
 int termHelperMain(char*);
 int diskHelperMain(char*);
+void diskSeek(int, int);
 
 // ----- Global data structures/vars
 
@@ -562,14 +563,14 @@ int diskHelperMain(char* args) {
         daemonQMbox = disk0Q;
         daemonMutex = disk0Mutex;
         daemonMutexTrack = disk0MutexTrack;
-        diskQPtr = &disk0Requests;
+        diskQPtr = &disk0Req;
     } else {
         diskUnit = 1;
         daemonMbox = disk1;
         daemonQMbox = disk1Q;
         daemonMutex = disk1Mutex;
-        daemonMutexTrack = diskMutex1Track;
-        diskQPtr = &disk1Requests;
+        daemonMutexTrack = disk1MutexTrack;
+        diskQPtr = &disk1Req;
     }
 
     // get number of tracks
@@ -578,23 +579,76 @@ int diskHelperMain(char* args) {
 
     // enable and receive the request
     int retval = USLOSS_DeviceOutput(USLOSS_DISK_DEV, diskUnit, &request);
-    retval = waitDevice(USLOSS_DISK_DEV, diskUnit, &status);
+    waitDevice(USLOSS_DISK_DEV, diskUnit, &status);
 
     // keep the number of tracks
     if (diskUnit == 0) disk0NumTracks = globaldisk;
     else disk1NumTracks = globaldisk;
 
     // now we can acquire the lock to work on this disk
-    MboxSend(driverMutexTrack, NULL, 0);
+    MboxSend(daemonMutexTrack, NULL, 0);
 
     // daemon work
     while (1) {
         // wait for syscall
         MboxRecv(daemonMbox, NULL, 0);
 
-        
+        while (*diskQPtr != NULL) {
+            diskQ = *diskQPtr;
+
+            int mboxID = diskQ->mboxID;
+            int track = diskQ->track;
+            int first = diskQ->first;
+            int sector = diskQ->sector;
+            void *buffer = diskQ->buffer;
+            int op = diskQ->op;
+
+            diskSeek(diskUnit, track);
+
+            // setup the USLOSS struct
+            request.opr = op;
+            request.reg1 = (void*)(long)first;
+            request.reg2 = buffer;
+
+            for (int i = 0; i < sector; i++) {
+                // if we were to go over, tart from beginning
+                if ((int)(long)request.reg1 == USLOSS_DISK_TRACK_SIZE) {
+                    request.reg1 = 0;
+                    track++;
+                    diskSeek(diskUnit, track);
+                }
+
+                // acquire lock since we will send a USLOSS request
+                MboxSend(daemonMutex, NULL, 0);
+
+                // send the request
+                res = USLOSS_DeviceOutput(USLOSS_DISK_DEV, diskUnit, &request);
+                waitDevice(USLOSS_DISK_DEV, diskUnit, &status);
+
+                // since we finish our work (send request), release lock
+                MboxRecv(daemonMutex, NULL, 0);
+
+                // increment request pointer to move sectors
+                request.reg1++;
+                request.reg2 += USLOSS_DISK_SECTOR_SIZE;
+            }
+
+            // acquire the lock on the queue since we will change it
+            MboxSend(daemonQMbox, NULL, 0);
+            
+            *diskQPtr = (*diskQPtr)->next;
+            diskQ->next = NULL;
+
+            // release the lock on the queue
+            MboxRecv(daemonQMbox, NULL, 0);
+
+            MboxSend(mboxID, NULL, 0);
+        }
     }
 
     return 0;
+}
+
+void diskSeek(int unit, int track) {
 
 }
