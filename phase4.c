@@ -33,18 +33,24 @@ typedef USLOSS_Sysargs sysArgs;
 typedef struct sleepRequest sleepRequest; 
 typedef struct diskRequest diskRequest; 
 
-
 // ----- Structs
 
 struct sleepRequest {
     int status;         // if the proc is awake or asleep
     long wakeUpTime;    // time to check if should wake up
-    sleepRequest *next; // next proc to sleep/wake up
+    sleepRequest* next; // next proc to sleep/wake up
     int mutex;          // lock for the request
 };
 
 struct diskRequest {
-
+    int pid;
+    int track;
+    int first;
+    int sector; 
+    void* buffer; 
+    int op;
+    int mboxID; 
+    diskRequest* next; 
 };
 
 // ----- Function Prototypes
@@ -68,6 +74,7 @@ int sleepHelperMain(char*);
 void cleanSleepEntry(int);
 int getNextSleeper();
 int termHelperMain(char*);
+int diskHelperMain(char*);
 
 // ----- Global data structures/vars
 
@@ -85,7 +92,19 @@ int termWriteMutex[USLOSS_TERM_UNITS];
 
 // disk
 diskRequest diskRequestsTable[MAXPROC];
-int curDiskIdx;
+int disk0;
+int disk0Q;
+int disk1;
+int disk1Q;
+int disk0Mutex;
+int disk1Mutex;
+int disk0MutexTrack;
+int disk1MutexTrack;
+int globaldisk;
+int disk0NumTracks;
+int disk1NumTracks;
+diskRequest* disk0Req;
+diskRequest* disk1Req;
 
 // ----- Phase 4 Bootload
 
@@ -113,6 +132,7 @@ void phase4_init(void) {
     memset(termLines, '\0', sizeof(termLines));
     memset(termLineIdx, 0, sizeof(termLineIdx));
     for (int i = 0; i < USLOSS_TERM_UNITS; i++) {
+        USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, (void*)(long)USLOSS_TERM_CTRL_RECV_INT(1));
         termRead[i] = MboxCreate(10, MAXLINE);
         termReadyWrite[i] = MboxCreate(1, 0);
         termWriteMutex[i] = MboxCreate(1, 0);
@@ -122,7 +142,20 @@ void phase4_init(void) {
     for (int i = 0; i < MAXPROC; i++) {
         cleanDiskEntry(i);
     }
-    curDiskIdx = 0;
+
+    // setup all mutexes
+    disk0 = MboxCreate(1, 0);
+    disk0Q = MboxCreate(1, 0);
+    disk1 = MboxCreate(1, 0);
+    disk1Q = MboxCreate(1, 0);
+    disk0Mutex = MboxCreate(1, 0);
+    disk1Mutex = MboxCreate(1, 0);
+    disk0MutexTrack = MboxCreate(1, 0);
+    disk1MutexTrack = MboxCreate(1, 0);
+
+    // setup linked lists
+    disk0Req = NULL;
+    disk1Req = NULL;
 }
 
 /**
@@ -142,6 +175,19 @@ void phase4_start_service_processes(void) {
 
         int termPID = fork1(termName, termHelperMain, termUnit, USLOSS_MIN_STACK, 2);
     }
+
+    // initialize disk daemons
+    for (int i = 0; i < USLOSS_DISK_UNITS; i++) {
+        // buffer for the driver to know which unit to use
+        char buffer[10];
+        sprintf(buffer, "%d", i);
+
+        char process[20];
+        sprintf(process, "Disk Driver %d", i);
+
+        int diskPID = fork1(process, diskHelperMain, buffer, USLOSS_MIN_STACK, 2);
+    }
+
 
 }
 
@@ -205,12 +251,12 @@ void sleepHandler(sysArgs* args) {
 void termReadHandler(sysArgs* args) {
     kernelCheck("termReadHandler");
 
-    char* location = (char*) args -> arg1;
-    int locationLen = (int)(long)args -> arg2;
-    int termUnit = (int)(long) args -> arg3;
+    char* location = (char*) args ->arg1;
+    int locationLen = (int)(long) args ->arg2;
+    int termUnit = (int)(long) args ->arg3;
 
     if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS) {
-        args->arg4  = (void*)(long)-1;
+        args->arg4 = (void*)(long)-1;
         return;
     }
 
@@ -224,7 +270,6 @@ void termReadHandler(sysArgs* args) {
     if (locationLen < lineLen) {
         lineLen = locationLen;
     }
-
     memcpy(location, line, lineLen);
 
     // set return values
@@ -246,9 +291,9 @@ void termReadHandler(sysArgs* args) {
 void termWriteHandler(sysArgs* args) {
     kernelCheck("termWriteHandler");
 
-    char* location = (char*) args -> arg1;
-    int locationLen = (int)(long)args -> arg2;
-    int termUnit = (int)(long) args -> arg3;
+    char* location = (char*) args ->arg1;
+    int locationLen = (int)(long) args ->arg2;
+    int termUnit = (int)(long) args ->arg3;
 
     if (location == NULL || locationLen <= 0 || termUnit < 0 || termUnit >= USLOSS_TERM_UNITS) {
         args->arg4  = (void*)(long)-1;
@@ -423,10 +468,8 @@ int termHelperMain(char* args) {
 
     // get the terminal unit
     int termUnit = atoi(args);
-
-    // start receiving interrupts
-    int devCtrl = USLOSS_TERM_CTRL_RECV_INT(1) | USLOSS_TERM_CTRL_XMIT_INT(1);
-    int deviceOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long)devCtrl);
+    
+    USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void *)(long)USLOSS_TERM_CTRL_RECV_INT(0));
     
     while (1) {
         waitDevice(USLOSS_TERM_DEV, termUnit, &status);
@@ -484,5 +527,74 @@ int termHelperMain(char* args) {
  * @param slot, int representing index into the diskRequestTable
  */
 void cleanDiskEntry(int slot) {
+    diskRequestsTable[slot].pid = -1;
+    diskRequestsTable[slot].next = NULL;
+    diskRequestsTable[slot].mboxID = MboxCreate(1, 0);
+}
+
+/**
+ * Main function for the daemon process responsible for checking
+ * disk requests. 
+ * 
+ * @param args, char pointer for the main function arguments
+ * 
+ * @return int representing if the exit status was normal
+ */
+int diskHelperMain(char* args) {
+    int daemonMbox;
+    int daemonQMbox;
+    int daemonMutex;
+    int daemonMutexTrack;
+    int diskUnit;
+
+
+    int res;
+    int status;
+
+    diskRequest** diskQPtr = NULL;
+    diskRequest* diskQ = NULL;
+    USLOSS_DeviceRequest request; 
+
+    // select appropriate disk
+    if (*args == '0') {
+        diskUnit = 0;
+        daemonMbox = disk0;
+        daemonQMbox = disk0Q;
+        daemonMutex = disk0Mutex;
+        daemonMutexTrack = disk0MutexTrack;
+        diskQPtr = &disk0Requests;
+    } else {
+        diskUnit = 1;
+        daemonMbox = disk1;
+        daemonQMbox = disk1Q;
+        daemonMutex = disk1Mutex;
+        daemonMutexTrack = diskMutex1Track;
+        diskQPtr = &disk1Requests;
+    }
+
+    // get number of tracks
+    request.opr = USLOSS_DISK_TRACKS;
+    request.reg1 = (void*)(long)&globaldisk;
+
+    // enable and receive the request
+    int retval = USLOSS_DeviceOutput(USLOSS_DISK_DEV, diskUnit, &request);
+    retval = waitDevice(USLOSS_DISK_DEV, diskUnit, &status);
+
+    // keep the number of tracks
+    if (diskUnit == 0) disk0NumTracks = globaldisk;
+    else disk1NumTracks = globaldisk;
+
+    // now we can acquire the lock to work on this disk
+    MboxSend(driverMutexTrack, NULL, 0);
+
+    // daemon work
+    while (1) {
+        // wait for syscall
+        MboxRecv(daemonMbox, NULL, 0);
+
+        
+    }
+
+    return 0;
 
 }
