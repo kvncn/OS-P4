@@ -136,7 +136,7 @@ void phase4_init(void) {
     memset(termLines, '\0', sizeof(termLines));
     memset(termLineIdx, 0, sizeof(termLineIdx));
     for (int i = 0; i < USLOSS_TERM_UNITS; i++) {
-        USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, (void*)(long)USLOSS_TERM_CTRL_RECV_INT(1));
+        USLOSS_DeviceOutput(USLOSS_TERM_DEV, i, (void*)(long)0x2);
         termRead[i] = MboxCreate(10, MAXLINE);
         termReadyWrite[i] = MboxCreate(1, 0);
         termWriteMutex[i] = MboxCreate(1, 0);
@@ -312,13 +312,13 @@ void termWriteHandler(sysArgs* args) {
         MboxRecv(termReadyWrite[termUnit], NULL, 0);
 
         // get the control value
-        int ctrl = USLOSS_TERM_CTRL_XMIT_CHAR(0);
-        ctrl = USLOSS_TERM_CTRL_RECV_INT(ctrl);
-        ctrl = USLOSS_TERM_CTRL_XMIT_INT(ctrl);
-        ctrl = USLOSS_TERM_CTRL_CHAR(ctrl, location[i]);
+        int ctrl = 0x1;
+        ctrl |= 0x2;
+        ctrl |= 0x4;
+        ctrl |= (location[i] << 8);
 
         // update the control while writing to character
-        int devOut = USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long)ctrl);
+        USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void*)(long)ctrl);
     }
 
     // set return values
@@ -526,7 +526,7 @@ int termHelperMain(char* args) {
     // get the terminal unit
     int termUnit = atoi(args);
     
-    USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void *)(long)USLOSS_TERM_CTRL_RECV_INT(0));
+    //USLOSS_DeviceOutput(USLOSS_TERM_DEV, termUnit, (void *)(long)0x2);
     
     while (1) {
         waitDevice(USLOSS_TERM_DEV, termUnit, &status);
