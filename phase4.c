@@ -405,6 +405,7 @@ void diskWriteHandler(sysArgs* args) {
 
     if (unit != 1 && unit != 0) {
         args->arg4 = (void*)(long)-1;
+        return;
     }
 
     int numTracks = -1;
@@ -803,12 +804,14 @@ void diskQueueHelper(int unit, int pid, int mboxToSend) {
         // if no requests, this is the only one
         if (disk0Req == NULL) {
             disk0Req = &diskRequestsTable[pid % MAXPROC];
+            return;
         }
         diskReq = disk0Req;
     } else {
         // if no requests, this is the only one
         if (disk1Req == NULL) {
             disk1Req = &diskRequestsTable[pid % MAXPROC];
+            return;
         }
         diskReq = disk1Req;
     }
@@ -822,6 +825,7 @@ void diskQueueHelper(int unit, int pid, int mboxToSend) {
         }
         diskRequestsTable[pid % MAXPROC].next = diskReq->next;
         diskReq->next = &diskRequestsTable[pid % MAXPROC];
+        return;
     } else {
         while (diskReq->next != NULL && diskReq->next->track >= currTrack) {
             diskReq = diskReq->next;
@@ -829,12 +833,14 @@ void diskQueueHelper(int unit, int pid, int mboxToSend) {
 
         if (diskReq->next == NULL) {
             diskReq->next = &diskRequestsTable[pid % MAXPROC];
+            return;
         } else {
             while (diskReq->next != NULL && diskReq->next->track <= savedTrack) {
                 diskReq = diskReq->next;
             }
             diskRequestsTable[pid % MAXPROC].next = diskReq->next;
             diskReq->next = &diskRequestsTable[pid % MAXPROC];
+            return;
         }
     }
 }
